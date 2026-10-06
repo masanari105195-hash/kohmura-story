@@ -1,0 +1,66 @@
+name: instagram-story
+
+# 毎朝、予約システムの「今日の予約状況」を画像にして、Instagramのストーリーに自動で投稿する。
+on:
+  schedule:
+    # UTC 21:17 ＝ 日本時間 毎朝 6:17。
+    # GitHubの定期実行は、数分〜数十分遅れることがあるため、7時より前に余裕を持たせている（時刻を変える時は、UTC＝日本時間−9時間）。
+    - cron: "17 21 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "作る日付（YYYY-MM-DD）。空欄なら今日"
+        required: false
+      skip_post:
+        description: "true にすると、画像を作るだけで、Instagramには投稿しない（見た目の確認用）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write   # 作った画像を、このリポジトリに保存するために必要
+
+concurrency:
+  group: instagram-story
+  cancel-in-progress: false
+
+jobs:
+  story:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API_URL: ${{ secrets.API_URL }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+      STORY_SECRET: ${{ secrets.STORY_SECRET }}
+      STORY_THEME: ${{ vars.STORY_THEME }}
+      STORY_CLINIC: ${{ vars.STORY_CLINIC }}
+      STORY_HANDLE: ${{ vars.STORY_HANDLE }}
+      STORY_CTA: ${{ vars.STORY_CTA }}
+      STORY_NOTE: ${{ vars.STORY_NOTE }}
+      STORY_DATE: ${{ github.event.inputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 画像づくりの準備（ブラウザと日本語フォント）
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: 今日の予約状況の画像を作る
+        run: python make_story.py render
+
+      - name: 画像を保存して公開する
+        run: |
+          git config user.name "story-bot"
+          git config user.email "story-bot@users.noreply.github.com"
+          git add -A stories
+          git commit -m "story $(TZ=Asia/Tokyo date +%F)" || echo "変更なし"
+          git push
+
+      - name: Instagramのストーリーに投稿する
+        if: ${{ github.event.inputs.skip_post != 'true' }}
+        run: python make_story.py post
