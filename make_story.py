@@ -12,6 +12,8 @@ GitHub Actions（.github/workflows/story.yml）から、毎朝自動で実行さ
   STORY_SECRET   Apps Scriptに登録した STORY_PUSH_SECRET と同じ合言葉             ［必須：post］
   SITE_URL       予約ページを公開しているURL（例 https://xxx.pages.dev）。common.jsをここから取得する
                  （未設定なら、このフォルダの common.js を使う）
+  （画像の配色と、ストーリーに載せるオプションは、スタッフページで設定します。配色は、予約システムに保存された設定が最優先で、
+   未設定の場合のみ、次の STORY_THEME を使います）
   STORY_THEME    milk（明るいミルク色）/ ocean（青緑）/ sunset（夕焼け）（既定 milk）
   STORY_CLINIC   院名（既定 こうむら接骨院）　STORY_HANDLE  Instagramのアカウント名（例 @koumura_b.c）
   STORY_CTA      案内文（既定 ご予約はプロフィールのリンクから）　STORY_NOTE  毎日出したい一言（任意）
@@ -21,6 +23,15 @@ import os, sys, json, time, datetime, pathlib, urllib.request, urllib.error
 HERE = pathlib.Path(__file__).resolve().parent
 JST = datetime.timezone(datetime.timedelta(hours=9))
 KEEP_DAYS = 7  # 古い画像は、リポジトリが大きくならないよう、この日数を過ぎたら削除する
+THEMES = ("milk", "ocean", "sunset")
+
+
+def choose_theme(data, cfg):
+    """配色は、スタッフページで保存された設定（予約システム側）を最優先し、無ければ環境変数、それも無ければmilk"""
+    for cand in (str(data.get("storyTheme") or "").strip(), cfg.get("theme", "")):
+        if cand in THEMES:
+            return cand
+    return "milk"
 
 
 def target_date():
@@ -58,7 +69,7 @@ def load_common_js():
 
 def config_from_env():
     return {
-        "theme": os.environ.get("STORY_THEME", "milk").strip() or "milk",
+        "theme": os.environ.get("STORY_THEME", "").strip(),  # 空＝指定なし（予約システムの設定、無ければmilkを使う）
         "clinic": os.environ.get("STORY_CLINIC", "こうむら接骨院").strip() or "こうむら接骨院",
         "handle": os.environ.get("STORY_HANDLE", "").strip(),
         "cta": os.environ.get("STORY_CTA", "ご予約はプロフィールのリンクから").strip(),
@@ -109,7 +120,10 @@ def cmd_render():
     if not data.get("ok") or not isinstance(data.get("bookings"), list):
         sys.exit("予約システムの応答が想定と違います（Code.gsが最新か確認してください）: %s" % str(data)[:200])
     out = HERE / "stories" / ("story-%s.jpg" % date)
-    render_image({"today": date, "data": data, "config": config_from_env()}, out, load_common_js())
+    cfg = config_from_env()
+    cfg["theme"] = choose_theme(data, cfg)
+    print("配色:", cfg["theme"])
+    render_image({"today": date, "data": data, "config": cfg}, out, load_common_js())
     cleanup_old(HERE / "stories")
     print("作成しました:", out, "(%d KB)" % (out.stat().st_size // 1024))
 
@@ -165,14 +179,30 @@ def cmd_post():
 
 
 # ---------------- 見本づくり（配色選び・動作確認用） ----------------
-def sample_data(counts, extra=None):
+SAMPLE_OPTIONS = [
+    {"name": "特殊電気治療", "duration": 60, "capacity": 1, "showOnStory": True},
+    {"name": "トレーニング", "duration": 30, "capacity": 2, "showOnStory": True},
+    {"name": "温熱療法", "duration": 30, "capacity": None, "showOnStory": False},   # ストーリーには載せない設定の例
+]
+
+
+def sample_data(counts, extra=None, opts=None):
+    """counts：{時間: 予約人数}。opts：[(時間, [オプション名, ...]), ...] を付けると、その枠にオプション付きの予約が1件ずつ入る"""
     bookings = []
     n = 0
     for t, c in counts.items():
         for _ in range(c):
             n += 1
             bookings.append({"id": "s%d" % n, "date": "SAMPLEDATE", "time": t, "duration": 30})
-    d = {"bookings": bookings, "menu": [], "options": [], "closures": [], "openDays": [], "capacity": 3, "slotCapacities": []}
+    for t, names in (opts or []):
+        n += 1
+        use = {}
+        for name in names:
+            d = next(o for o in SAMPLE_OPTIONS if o["name"] == name)
+            use[name] = max(1, -(-d["duration"] // 30))
+        bookings.append({"id": "o%d" % n, "date": "SAMPLEDATE", "time": t, "duration": 30,
+                         "options": "、".join(names), "optionUse": use})
+    d = {"bookings": bookings, "menu": [], "options": SAMPLE_OPTIONS, "closures": [], "openDays": [], "capacity": 3, "slotCapacities": []}
     d.update(extra or {})
     return d
 
@@ -183,6 +213,11 @@ def cmd_preview(outdir):
     common = load_common_js()
     scenarios = {
         "weekday":  ("2026-10-06", sample_data({"8:30": 1, "9:00": 2, "9:30": 1, "16:30": 3, "17:00": 3, "17:30": 2})),
+        # オプションの予約がある日（60分のオプションは、次の枠まで ↓ で続く。非表示設定のオプションは載らない）
+        "options":  ("2026-10-07", sample_data({"8:30": 1, "9:00": 1, "11:00": 1, "16:00": 2},
+                                               opts=[("9:00", ["特殊電気治療"]), ("10:30", ["トレーニング"]), ("10:30", ["トレーニング"]),
+                                                     ("11:00", ["特殊電気治療", "トレーニング"]), ("15:30", ["トレーニング"]),
+                                                     ("17:00", ["特殊電気治療"]), ("17:30", ["温熱療法"])])),
         "saturday": ("2026-10-10", sample_data({"8:00": 3, "9:30": 2, "10:30": 1})),
         "closed":   ("2026-10-11", sample_data({})),
         "partial":  ("2026-10-07", sample_data({"8:30": 2}, {"closures": [{"date": "2026-10-07", "ranges": [{"start": "10:00", "end": "12:00"}]}]})),

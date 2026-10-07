@@ -56,17 +56,15 @@
   .eyebrow{font-size:30px; letter-spacing:.42em; font-weight:400; color:var(--sub); padding-left:.42em}
   .weekday{font-size:140px; line-height:1; font-weight:200; letter-spacing:.14em; padding-left:.14em; margin-top:14px; white-space:nowrap}
   .weekday span{display:inline-block}
-  .dateline{display:inline-flex; align-items:center; gap:26px; margin-top:16px; padding:14px 44px; border-radius:999px; background:var(--chip); border:1.5px solid var(--cardline)}
-  .dateline .md{font-size:62px; font-weight:300; letter-spacing:.06em}
-  .dateline .bar{width:2px; height:46px; background:var(--cardline)}
-  .dateline .jp{font-size:44px; font-weight:700; letter-spacing:.04em}
+  .dateline{display:inline-flex; align-items:center; margin-top:16px; padding:14px 56px; border-radius:999px; background:var(--chip); border:1.5px solid var(--cardline)}
+  .dateline .jp{font-size:54px; font-weight:700; letter-spacing:.06em}
   .title{margin-top:22px; font-size:44px; font-weight:700; letter-spacing:.2em; padding-left:.2em}
 
   /* ---- 本文 ---- */
-  main{position:absolute; left:0; right:0; top:668px; display:flex; justify-content:center; gap:36px; padding:0 56px}
-  .card{background:var(--card); border:1.5px solid var(--cardline); border-radius:56px; padding:34px 38px 30px; box-shadow:0 30px 70px rgba(0,0,0,.14); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px)}
+  main{position:absolute; left:0; right:0; top:668px; display:flex; justify-content:center; gap:28px; padding:0 40px}
+  .card{background:var(--card); border:1.5px solid var(--cardline); border-radius:56px; padding:34px 30px 30px; box-shadow:0 30px 70px rgba(0,0,0,.14); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px)}
   .card.one{width:640px}
-  .card.two{width:468px}
+  .card.two{width:486px}
   .card h3{display:flex; align-items:baseline; justify-content:center; gap:16px; font-size:46px; font-weight:900; letter-spacing:.12em; padding-bottom:16px; margin-bottom:6px; border-bottom:1.5px solid var(--rowline)}
   .card h3 small{font-size:23px; font-weight:400; letter-spacing:.3em; color:var(--sub)}
   ul{list-style:none}
@@ -82,6 +80,19 @@
   li.full .t{color:var(--full)}
   .theme-milk li.ok .mark svg, .theme-milk li.few .mark svg{filter:none}
   ul.cols2{columns:2; column-gap:30px}
+
+  /* ---- オプションの予約状況を載せる日の行：「時間　◯　オプション名」の順に並べる ---- */
+  .card.withopts li{display:grid; grid-template-columns:142px 50px minmax(0,1fr); column-gap:10px; align-items:center}
+  .card.withopts li .dots{display:none}
+  .card.withopts li .t{font-size:42px; min-width:0; letter-spacing:0; white-space:nowrap}
+  .card.withopts li .t i{font-size:26px}
+  .card.withopts li .mark{width:50px; height:50px}
+  .card.withopts li .mark svg{width:46px; height:46px}
+  .opts{display:flex; flex-direction:column; justify-content:center; gap:2px; min-width:0}
+  .opt{display:inline-flex; align-items:center; gap:6px; align-self:flex-start; max-width:100%; font-size:27px; font-weight:700; line-height:1.25; white-space:nowrap; color:var(--ink); padding:3px 14px; border-radius:999px; background:var(--chip); border:1.5px solid var(--cardline)}
+  .opt.cont{background:transparent; border-color:transparent; padding-left:20px}
+  .opt svg{width:26px; height:34px; flex:none; overflow:visible; color:var(--accent)}
+  .opt.many{font-size:22px; padding:1px 12px}
   ul.cols2 li{break-inside:avoid}
 
   /* ---- 休診日 ---- */
@@ -111,7 +122,7 @@
   <header>
     <div class="eyebrow en" id="eyebrow">TODAY'S RESERVATION</div>
     <div class="weekday en"><span id="weekday"></span></div>
-    <div class="dateline"><span class="md en" id="md"></span><span class="bar"></span><span class="jp" id="jp"></span></div>
+    <div class="dateline"><span class="jp" id="jp"></span></div>
     <div class="title" id="title">今日の予約状況</div>
   </header>
   <main id="content"></main>
@@ -134,14 +145,67 @@
     if (remaining === 1 && cap >= 2) return "few";
     return "ok";
   }
-  function rowHtml(t, st){
-    const m = t.split(":");
-    return '<li class="'+st+'"><span class="t en">'+m[0]+':'+m[1]+'<i>〜</i></span><span class="dots"></span><span class="mark">'+MARKS[st]+'</span></li>';
+  // オプションが次の枠まで続くことを示す矢印（↓）。文字ではなく図形で描く
+  const ARROW = '<svg viewBox="0 0 26 34" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 V29 M4 20 L13 30 L22 20"/></svg>';
+  // 1行ぶんのオプション表示。items：[{name, kind:"start"|"cont", n}]（start＝その枠から使い始める／cont＝前の枠から続いている）
+  //   ・使い始める枠には、オプション名（同じ枠に2件以上なら「×2」）
+  //   ・前の枠から続いている枠には、↓（その行に他のオプションもある場合は、↓とオプション名）
+  function optsHtml(items){
+    if (!items.length) return '<span class="opts"></span>';
+    const shownItems = items.slice(0, 3);
+    const many = shownItems.length >= 2 ? " many" : "";
+    const arrowOnly = items.length === 1 && items[0].kind === "cont";
+    return '<span class="opts">' + shownItems.map(it => it.kind === "cont"
+      ? '<span class="opt cont'+many+'">'+ARROW+(arrowOnly ? '' : '<span class="nm">'+esc(it.name)+'</span>')+'</span>'
+      : '<span class="opt'+many+'"><span class="nm">'+esc(it.name)+(it.n > 1 ? '×'+it.n : '')+'</span></span>'
+    ).join("") + '</span>';
   }
-  function cardHtml(label, en, times, statuses, single){
+  function rowHtml(t, st, items, withOpts){
+    const m = t.split(":");
+    return '<li class="'+st+'"><span class="t en">'+m[0]+':'+m[1]+'<i>〜</i></span>'+(withOpts ? '' : '<span class="dots"></span>')
+      + '<span class="mark">'+MARKS[st]+'</span>'+(withOpts ? optsHtml(items || []) : '')+'</li>';
+  }
+  function cardHtml(label, en, times, statuses, single, optInfo, withOpts){
     const many = times.length > 9;
-    return '<section class="card '+(single ? 'one' : 'two')+'"><h3>'+label+'<small class="en">'+en+'</small></h3><ul'+(many?' class="cols2"':'')+'>'
-      + times.map(t=>rowHtml(t, statuses[t])).join("") + '</ul></section>';
+    return '<section class="card '+(single ? 'one' : 'two')+(withOpts ? ' withopts' : '')+'"><h3>'+label+'<small class="en">'+en+'</small></h3><ul'+(many?' class="cols2"':'')+'>'
+      + times.map(t=>rowHtml(t, statuses[t], optInfo[t], withOpts)).join("") + '</ul></section>';
+  }
+
+  // その日の、枠ごとのオプションの使用状況を求める。スタッフページで「ストーリーに表示しない」にしたオプションは載せない。
+  // 戻り値：{ "9:00": [ {name, kind:"start", n}, ... ], "9:30": [ {name, kind:"cont", n} ] }
+  function buildOptionInfo(today, bookings, slotsForDay){
+    const order = OPTION_DEFS.filter(o => o.showOnStory !== false).map(o => o.name);
+    const raw = {};
+    bookings.filter(b => b.date === today).forEach(b => {
+      const use = optionUseFor(b);
+      Object.keys(use).forEach(name => {
+        if (order.indexOf(name) === -1) return; // 設定に無い名前・非表示のオプションは載せない
+        const req = getRequiredSlots(b.time, (Number(use[name]) || 1) * 30, slotsForDay) || [b.time];
+        req.forEach((t, i) => {
+          raw[t] = raw[t] || {};
+          const e = raw[t][name] = raw[t][name] || { starts: 0, cont: 0 };
+          if (i === 0) e.starts++; else e.cont++;
+        });
+      });
+    });
+    const out = {};
+    Object.keys(raw).forEach(t => {
+      out[t] = order.filter(n => raw[t][n]).map(n => {
+        const e = raw[t][n];
+        return { name: n, kind: e.starts > 0 ? "start" : "cont", n: e.starts + e.cont };
+      });
+    });
+    return out;
+  }
+  // 長いオプション名は、枠からはみ出さないよう、文字を小さくして収める
+  function fitOptionLabels(){
+    document.querySelectorAll(".opts").forEach(box => {
+      const limit = box.getBoundingClientRect().width;
+      box.querySelectorAll(".opt").forEach(el => {
+        let fs = parseFloat(getComputedStyle(el).fontSize);
+        while (el.getBoundingClientRect().width > limit && fs > 15) { fs -= 1; el.style.fontSize = fs + "px"; }
+      });
+    });
   }
 
   /**
@@ -164,7 +228,6 @@
     // WEDNESDAY など文字数の多い曜日が画面からはみ出さないよう、幅に収まるまで文字を小さくする
     const wdBox = wd.parentElement; wdBox.style.fontSize = "140px";
     for (let fs = 140; fs > 70 && wd.getBoundingClientRect().width > 940; fs -= 4) wdBox.style.fontSize = fs + "px";
-    document.getElementById("md").textContent = String(dt.getMonth()+1).padStart(2,"0") + "." + String(dt.getDate()).padStart(2,"0");
     document.getElementById("jp").textContent = (dt.getMonth()+1) + "月" + dt.getDate() + "日（" + DOW[dt.getDay()] + "）";
 
     const slots = getSlotsForDate(today);
@@ -190,22 +253,28 @@
     }
 
     // ---- 診療日：枠ごとの空き状況 ----
+    setOptionDefs(d.options);
     const counts = getCountsForDate(today, bookings);
     const statuses = {};
     slots.forEach(t=>{
       const cap = capacityFor(today, t);
       statuses[t] = statusFor(cap - (counts[t]||0), cap);
     });
+    const optInfo = buildOptionInfo(today, bookings, slots);
+    const withOpts = slots.some(t => (optInfo[t] || []).length > 0);
+    const hasCont = Object.keys(optInfo).some(t => optInfo[t].some(it => it.kind === "cont"));
     const am = slots.filter(t => toMinutes(t) < 12*60), pm = slots.filter(t => toMinutes(t) >= 12*60);
     const groups = [];
     if (am.length) groups.push({ label:"午前", en:"MORNING", times:am });
     if (pm.length) groups.push({ label:"午後", en:"AFTERNOON", times:pm });
-    main.innerHTML = groups.map(g => cardHtml(g.label, g.en, g.times, statuses, groups.length === 1)).join("");
+    main.innerHTML = groups.map(g => cardHtml(g.label, g.en, g.times, statuses, groups.length === 1, optInfo, withOpts)).join("");
+    if (withOpts) fitOptionLabels();
 
     // 時間帯を絞った営業・一部休診の日は、「表示のない時間は受付していない」ことを添える
     const partial = (findClosure(today) && findClosure(today).ranges.length) || findOpenDay(today);
     const legend = '<div class="legend"><span class="lo">'+MARKS.ok+'空きあり</span><span class="lf">'+MARKS.few+'残りわずか</span><span class="lx">'+MARKS.full+'満席</span></div>';
     footer.innerHTML = legend
+      + (withOpts && hasCont ? '<div class="note">↓ は、前の枠のオプションが続いていることを表します</div>' : '')
       + (partial ? '<div class="note">※表示のない時間帯は、受付していません</div>' : '')
       + (cfg.note ? '<div class="note">'+cfg.note+'</div>' : '')
       + '<div class="cta">'+cfg.cta+'</div>' + brand;
