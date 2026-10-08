@@ -43,11 +43,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Playwright and fonts
+      - name: Install Playwright
+        timeout-minutes: 8
         run: |
           pip install playwright
           playwright install --with-deps chromium
-          sudo apt-get install -y fonts-noto-cjk
+
+      # 日本語の予備フォント（通常は Google Fonts から読み込むので、無くても画像は作れる）。
+      # ダウンロードが遅くても、ここで止まらないよう、小さいフォントを使い、失敗・時間切れでも先へ進む。
+      - name: Install fallback Japanese font
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y --no-install-recommends fonts-ipafont-gothic
 
       - name: Render story image
         run: python make_story.py render
