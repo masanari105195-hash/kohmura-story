@@ -480,3 +480,164 @@ if (typeof document !== "undefined") {
     applyTheme(currentTheme());
   });
 }
+
+
+// =====================================================================
+// Instagramストーリー画像の配色（標準7色＋スタッフが作る配色）、曜日ごとの切り替え、背景画像
+//   ・ストーリー画像（story.html）とスタッフページのプレビューで、同じ関数を使う
+//   ・Code.gs の STORY_* と同じ上限・同じ項目にすること
+// =====================================================================
+const STORY_MAX_THEMES = 15;     // 標準＋自作の合計の上限
+const STORY_NAME_MAX = 12;       // 配色の名前の最大文字数
+const STORY_IMAGE_POS = ["tl","tc","tr","ml","mc","mr","bl","bc","br"]; // 9分割の位置（上/中/下 × 左/中央/右）
+const STORY_COLOR_KEYS = ["bgTop","bgMid","bgBottom","ink","ok","few","cardColor"];
+const STORY_WEEK_LABELS = ["月","火","水","木","金","土","日"];
+
+function storyHex_(v, fb){ return /^#[0-9a-f]{6}$/i.test(String(v||"")) ? String(v).toLowerCase() : fb; }
+function storyRgb_(hex){ const h = storyHex_(hex, "#000000"); return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+function storyRgba_(hex, a){ const c = storyRgb_(hex); return "rgba("+c[0]+","+c[1]+","+c[2]+","+(Math.round(a*100)/100)+")"; }
+function storyMix_(h1, h2, t){ // h1 と h2 を t:(1-t) で混ぜた色
+  const a = storyRgb_(h1), b = storyRgb_(h2);
+  return "#" + [0,1,2].map(i => ("0" + Math.round(a[i]*t + b[i]*(1-t)).toString(16)).slice(-2)).join("");
+}
+function storyLum_(hex){
+  const c = storyRgb_(hex).map(v => { v /= 255; return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); });
+  return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+}
+function storyContrast_(h1, h2){
+  const a = storyLum_(h1), b = storyLum_(h2);
+  return (Math.max(a,b)+0.05) / (Math.min(a,b)+0.05);
+}
+
+// 標準の配色。vars があるものは、その見た目をそのまま使う（f は「複製して作る」ときの元になる色）
+const STORY_BUILTIN_THEMES = [
+  { id:"milk", name:"ミルク", builtin:true,
+    f:{ bgTop:"#f7fbf9", bgMid:"#e0f3ec", bgBottom:"#fdf1e0", ink:"#1d3a33", ok:"#1f9d74", few:"#d98a16", cardColor:"#ffffff", cardAlpha:72 },
+    vars:{ "--bg":"linear-gradient(165deg,#f7fbf9 0%,#e0f3ec 48%,#fdf1e0 100%)",
+      "--blob1":"rgba(110,205,170,.34)", "--blob2":"rgba(255,196,120,.34)", "--blob3":"rgba(130,190,235,.26)",
+      "--ink":"#1d3a33", "--sub":"#4f6b63", "--card":"rgba(255,255,255,.72)", "--cardline":"rgba(47,111,98,.20)", "--rowline":"rgba(47,111,98,.20)",
+      "--ok":"#1f9d74", "--few":"#d98a16", "--full":"#93a69d", "--accent":"#2f6f62", "--chip":"rgba(47,111,98,.10)", "--glow-ok":"none", "--glow-few":"none" } },
+  { id:"ocean", name:"青緑", builtin:true,
+    f:{ bgTop:"#052a40", bgMid:"#0f7f94", bgBottom:"#86e3b4", ink:"#ffffff", ok:"#9bf6c4", few:"#ffd166", cardColor:"#ffffff", cardAlpha:13 },
+    vars:{ "--bg":"linear-gradient(165deg,#052a40 0%,#0a5c7a 34%,#0f9ea3 68%,#86e3b4 100%)",
+      "--blob1":"rgba(134,239,196,.38)", "--blob2":"rgba(255,226,140,.30)", "--blob3":"rgba(120,200,255,.28)",
+      "--ink":"#ffffff", "--sub":"rgba(255,255,255,.78)", "--card":"rgba(255,255,255,.13)", "--cardline":"rgba(255,255,255,.38)", "--rowline":"rgba(255,255,255,.28)",
+      "--ok":"#9bf6c4", "--few":"#ffd166", "--full":"rgba(255,255,255,.50)", "--accent":"#ffffff", "--chip":"rgba(255,255,255,.18)",
+      "--glow-ok":"drop-shadow(0 0 10px rgba(155,246,196,.45))", "--glow-few":"drop-shadow(0 0 10px rgba(255,209,102,.45))" } },
+  { id:"sunset", name:"夕焼け", builtin:true,
+    f:{ bgTop:"#34195f", bgMid:"#b2557f", bgBottom:"#ffbf8b", ink:"#ffffff", ok:"#c3fadc", few:"#ffe38e", cardColor:"#ffffff", cardAlpha:14 },
+    vars:{ "--bg":"linear-gradient(165deg,#34195f 0%,#a24b8a 38%,#f0777f 70%,#ffbf8b 100%)",
+      "--blob1":"rgba(255,214,170,.40)", "--blob2":"rgba(255,120,170,.34)", "--blob3":"rgba(150,120,255,.30)",
+      "--ink":"#ffffff", "--sub":"rgba(255,255,255,.82)", "--card":"rgba(255,255,255,.14)", "--cardline":"rgba(255,255,255,.40)", "--rowline":"rgba(255,255,255,.30)",
+      "--ok":"#c3fadc", "--few":"#ffe38e", "--full":"rgba(255,255,255,.52)", "--accent":"#ffffff", "--chip":"rgba(255,255,255,.20)",
+      "--glow-ok":"drop-shadow(0 0 10px rgba(195,250,220,.45))", "--glow-few":"drop-shadow(0 0 10px rgba(255,227,142,.45))" } },
+  { id:"sakura", name:"さくら", builtin:true,
+    f:{ bgTop:"#fff6f8", bgMid:"#ffe2ec", bgBottom:"#fff0dd", ink:"#4a2a36", ok:"#d63f7a", few:"#e0881a", cardColor:"#ffffff", cardAlpha:70 } },
+  { id:"lemon", name:"レモン", builtin:true,
+    f:{ bgTop:"#fffdf0", bgMid:"#fff3b8", bgBottom:"#e4f5d4", ink:"#3b3a14", ok:"#3c8d2b", few:"#d9701a", cardColor:"#ffffff", cardAlpha:70 } },
+  { id:"forest", name:"森", builtin:true,
+    f:{ bgTop:"#0d2a21", bgMid:"#1f5d47", bgBottom:"#7fb892", ink:"#ffffff", ok:"#b9f6d2", few:"#ffdc8a", cardColor:"#ffffff", cardAlpha:12 } },
+  { id:"night", name:"夜空", builtin:true,
+    f:{ bgTop:"#0a0f2e", bgMid:"#1c2a68", bgBottom:"#4a5fb0", ink:"#ffffff", ok:"#9fe9ff", few:"#ffd166", cardColor:"#ffffff", cardAlpha:12 } }
+];
+const STORY_DEFAULT_WEEKLY = ["milk","ocean","sunset","sakura","lemon","forest","night"]; // 月〜日
+
+// 色の設定（f）から、画面で使う変数を作る
+function storyDeriveVars(f){
+  const light = storyLum_(f.ink) > 0.5; // 文字が明るい色＝暗い背景の配色。◯△にほんのり光を付ける
+  return {
+    "--bg":"linear-gradient(165deg,"+f.bgTop+" 0%,"+f.bgMid+" 50%,"+f.bgBottom+" 100%)",
+    "--blob1":storyRgba_(f.ok,.30), "--blob2":storyRgba_(f.few,.30), "--blob3":storyRgba_(storyMix_(f.ok,f.few,.5),.24),
+    "--ink":f.ink, "--sub":storyRgba_(f.ink,.74),
+    "--card":storyRgba_(f.cardColor, f.cardAlpha/100), "--cardline":storyRgba_(f.ink,.22), "--rowline":storyRgba_(f.ink,.20),
+    "--ok":f.ok, "--few":f.few, "--full":storyRgba_(f.ink,.42), "--accent":f.ok, "--chip":storyRgba_(f.ink,.10),
+    "--glow-ok":light ? "drop-shadow(0 0 10px "+storyRgba_(f.ok,.45)+")" : "none",
+    "--glow-few":light ? "drop-shadow(0 0 10px "+storyRgba_(f.few,.45)+")" : "none"
+  };
+}
+function storyVarsFor(theme){ return theme.vars || storyDeriveVars(theme.f); }
+function storyVarsToStyle(vars){ return Object.keys(vars).map(k => k + ":" + vars[k]).join(";"); }
+
+// 自作配色の入力を、安全な形に整える（足りない・不正な項目は、ミルクの値で埋める）
+function storyNormalizeTheme(t){
+  t = t || {};
+  const base = STORY_BUILTIN_THEMES[0].f, src = t.f || {};
+  const f = {};
+  STORY_COLOR_KEYS.forEach(k => { f[k] = storyHex_(src[k], base[k]); });
+  const ca = Math.round(Number(src.cardAlpha)); f.cardAlpha = (ca >= 0 && ca <= 100) ? ca : base.cardAlpha;
+  const out = { id:String(t.id || "").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,40), name:String(t.name || "").trim().slice(0, STORY_NAME_MAX), f:f };
+  const im = t.image;
+  if (im && typeof im === "object" && String(im.imageId || "").replace(/[^a-zA-Z0-9_-]/g,"")) {
+    const size = Math.round(Number(im.size)), op = Math.round(Number(im.opacity)), ov = Math.round(Number(im.overlay));
+    out.image = {
+      imageId: String(im.imageId).replace(/[^a-zA-Z0-9_-]/g,"").slice(0,40),
+      mode: im.mode === "cover" ? "cover" : "logo",
+      pos: STORY_IMAGE_POS.indexOf(im.pos) !== -1 ? im.pos : "mc",
+      size: (size >= 10 && size <= 100) ? size : 50,
+      opacity: (op >= 5 && op <= 100) ? op : 100,
+      overlay: (ov >= 0 && ov <= 90) ? ov : 0
+    };
+  }
+  return out;
+}
+// 標準7色＋自作配色。自作配色の id が標準と重なるものは無視する
+function storyAllThemes(customList){
+  const out = STORY_BUILTIN_THEMES.slice();
+  (Array.isArray(customList) ? customList : []).forEach(c => {
+    const n = storyNormalizeTheme(c);
+    if (n.id && n.name && !out.some(o => o.id === n.id) && out.length < STORY_MAX_THEMES) out.push(n);
+  });
+  return out;
+}
+function storyFindTheme(id, customList){
+  const all = storyAllThemes(customList);
+  return all.find(t => t.id === id) || all[0]; // 見つからない（削除済みなど）ときは、ミルク
+}
+function storyDefaultConfig(){ return { mode:"weekly", fixedId:"milk", weekly:STORY_DEFAULT_WEEKLY.slice(), themes:[] }; }
+function storyNormalizeConfig(raw){
+  const d = storyDefaultConfig(), r = (raw && typeof raw === "object") ? raw : {};
+  const themes = (Array.isArray(r.themes) ? r.themes : []).map(storyNormalizeTheme).filter(t => t.id && t.name);
+  const ids = storyAllThemes(themes).map(t => t.id);
+  const okId = v => ids.indexOf(v) !== -1 ? v : "milk";
+  const weekly = [];
+  for (let i = 0; i < 7; i++) weekly.push(okId(Array.isArray(r.weekly) && r.weekly[i] ? r.weekly[i] : d.weekly[i]));
+  return { mode: r.mode === "fixed" ? "fixed" : "weekly", fixedId: okId(r.fixedId || d.fixedId), weekly:weekly, themes:themes };
+}
+// その日（YYYY-MM-DD）に使う配色の id。weekly は月〜日の順
+function storyThemeIdFor(cfg, dateISO){
+  const c = storyNormalizeConfig(cfg);
+  if (c.mode === "fixed") return c.fixedId;
+  const dow = new Date(dateISO + "T00:00:00").getDay(); // 0=日
+  return c.weekly[(dow + 6) % 7];
+}
+// 配色の読みにくさのチェック。戻り値：注意の文章の配列（空なら問題なし）
+function storyCheckColors(f){
+  const warn = [];
+  const card = storyMix_(f.cardColor, f.bgMid, f.cardAlpha/100); // カードの上の実際の色
+  const worstText = Math.min(storyContrast_(f.ink, card), storyContrast_(f.ink, f.bgTop), storyContrast_(f.ink, f.bgMid));
+  if (worstText < 3.5) warn.push("文字の色が、背景やカードの色と近く、読みにくい可能性があります。");
+  if (storyContrast_(f.ok, card) < 2.2) warn.push("「◯」の色が、カードの色と近く、見えにくい可能性があります。");
+  if (storyContrast_(f.few, card) < 2.2) warn.push("「△」の色が、カードの色と近く、見えにくい可能性があります。");
+  return warn;
+}
+// 背景画像の表示（HTML）。ロゴなどを置く「logo」と、全面に敷く「cover」。位置は画面に対する割合で指定するので、縮小したプレビューでも同じ見た目になる。
+// 上下の端はInstagramの表示と重なるため、少し内側（上14％・下15.5％）に置く。
+function storyImageHtml(theme, dataUrl){
+  const im = theme && theme.image;
+  if (!im || !dataUrl) return "";
+  const v = im.pos.charAt(0), h = im.pos.charAt(1), op = im.opacity/100;
+  if (im.mode === "cover") {
+    const objPos = (h === "l" ? "left" : h === "r" ? "right" : "center") + " " + (v === "t" ? "top" : v === "b" ? "bottom" : "center");
+    const mid = storyVarsFor(theme)["--bg"] ? theme.f.bgMid : "#ffffff";
+    return '<div class="bgimg" style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden">'
+      + '<img src="'+dataUrl+'" alt="" style="width:100%;height:100%;object-fit:cover;object-position:'+objPos+';opacity:'+op+'">'
+      + (im.overlay > 0 ? '<div style="position:absolute;left:0;top:0;width:100%;height:100%;background:'+storyRgba_(mid, im.overlay/100)+'"></div>' : '')
+      + '</div>';
+  }
+  let st = "position:absolute;width:"+im.size+"%;height:auto;max-height:62%;object-fit:contain;opacity:"+op+";";
+  const tf = [];
+  if (h === "l") st += "left:5.5%;"; else if (h === "r") st += "right:5.5%;"; else { st += "left:50%;"; tf.push("translateX(-50%)"); }
+  if (v === "t") st += "top:14%;"; else if (v === "b") st += "bottom:15.5%;"; else { st += "top:50%;"; tf.push("translateY(-50%)"); }
+  if (tf.length) st += "transform:" + tf.join(" ") + ";";
+  return '<div class="bgimg" style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden"><img src="'+dataUrl+'" alt="" style="'+st+'"></div>';
+}

@@ -23,7 +23,7 @@ import os, sys, json, time, datetime, pathlib, urllib.request, urllib.error
 HERE = pathlib.Path(__file__).resolve().parent
 JST = datetime.timezone(datetime.timedelta(hours=9))
 KEEP_DAYS = 7  # 古い画像は、リポジトリが大きくならないよう、この日数を過ぎたら削除する
-THEMES = ("milk", "ocean", "sunset")
+THEMES = ("milk", "ocean", "sunset", "sakura", "lemon", "forest", "night")  # 標準の配色（common.js の STORY_BUILTIN_THEMES と同じ）
 
 
 def choose_theme(data, cfg):
@@ -54,7 +54,7 @@ def http_get(url, timeout=60, retries=3):
     raise RuntimeError("取得に失敗しました: %s (%s)" % (url, last))
 
 
-REQUIRED_FUNCS = ("setOptionDefs", "optionUseFor", "isTrueValue", "getCountsForDate", "getRequiredSlots",
+REQUIRED_FUNCS = ("storyThemeIdFor", "storyFindTheme", "storyVarsFor", "storyImageHtml", "setOptionDefs", "optionUseFor", "isTrueValue", "getCountsForDate", "getRequiredSlots",
                   "setSlotCapacities", "capacityFor", "normalizeBooking", "setExtraClosures", "setExtraOpenDays")
 
 
@@ -114,6 +114,10 @@ def _render_once(payload, out_path, common_js, block_fonts):
                 page.evaluate("p => window.renderStory(p)", payload)
             except Exception as e:
                 raise RuntimeError("画像の描画でエラーが出ました（common.js が古い可能性があります）: %s" % str(e)[:300])
+            try:  # 背景画像の読み込み（デコード）を待つ
+                page.evaluate("Promise.all(Array.from(document.images).map(i => i.decode().catch(() => null))).then(() => true)")
+            except Exception:
+                pass
             try:  # フォントの読み込みは最大8秒だけ待つ（待ち続けて固まらないように）
                 page.evaluate("Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 8000))]).then(() => true)")
             except Exception:
@@ -158,6 +162,41 @@ def cleanup_old(stories_dir):
             print("古い画像を削除:", f.name)
 
 
+def resolve_theme_id(sc, date):
+    """その日に使う配色のid（common.js の storyThemeIdFor と同じ決め方。weekly は月〜日の順）"""
+    if sc.get("mode") == "fixed":
+        return sc.get("fixedId") or "milk"
+    wk = sc.get("weekly") or []
+    d = datetime.date.fromisoformat(date)
+    return wk[d.weekday()] if len(wk) == 7 and wk[d.weekday()] else "milk"
+
+
+def fetch_story(api, date):
+    """予約システム（スタッフページ）で設定した、曜日ごとの配色・自作配色・背景画像を取得する。
+    取得できなければ（Code.gsが古い等）None を返し、従来の配色の決め方に戻す。背景画像だけ取れない場合は、画像なしで続ける。"""
+    try:
+        sc = json.loads(http_get(api + ("&" if "?" in api else "?") + "action=storyConfig"))
+        if not sc.get("ok") or not isinstance(sc.get("weekly"), list):
+            raise ValueError("storyConfig が使えません（Code.gs を最新にしてください）")
+    except Exception as e:  # noqa
+        print("【注意】配色の設定を取得できなかったため、従来の配色の決め方を使います:", str(e)[:150])
+        return None
+    tid = resolve_theme_id(sc, date)
+    images = {}
+    theme = next((t for t in sc.get("themes", []) if t.get("id") == tid), None)
+    if theme and theme.get("image", {}).get("imageId"):
+        iid = theme["image"]["imageId"]
+        try:
+            im = json.loads(http_get(api + ("&" if "?" in api else "?") + "action=storyImage&id=" + iid, timeout=90))
+            if im.get("ok") and str(im.get("dataUrl", "")).startswith("data:image/"):
+                images[iid] = im["dataUrl"]
+            else:
+                print("【注意】背景画像を取得できませんでした。画像なしで作ります。")
+        except Exception as e:  # noqa
+            print("【注意】背景画像を取得できませんでした。画像なしで作ります:", str(e)[:150])
+    return {"config": {k: sc.get(k) for k in ("mode", "fixedId", "weekly", "themes")}, "images": images, "themeId": tid}
+
+
 def cmd_render():
     api = os.environ.get("API_URL", "").strip()
     if not api:
@@ -168,9 +207,13 @@ def cmd_render():
         sys.exit("予約システムの応答が想定と違います（Code.gsが最新か確認してください）: %s" % str(data)[:200])
     out = HERE / "stories" / ("story-%s.jpg" % date)
     cfg = config_from_env()
-    cfg["theme"] = choose_theme(data, cfg)
-    print("配色:", cfg["theme"])
-    render_image({"today": date, "data": data, "config": cfg}, out, load_common_js())
+    cfg["theme"] = choose_theme(data, cfg)  # 予約システムが古い場合の予備（従来の方法）
+    story = fetch_story(api, date)
+    print("配色:", (story or {}).get("themeId") or cfg["theme"])
+    payload = {"today": date, "data": data, "config": cfg}
+    if story:
+        payload["story"] = {"config": story["config"], "images": story["images"]}
+    render_image(payload, out, load_common_js())
     cleanup_old(HERE / "stories")
     print("作成しました:", out, "(%d KB)" % (out.stat().st_size // 1024))
 
@@ -270,10 +313,12 @@ def cmd_preview(outdir):
         "partial":  ("2026-10-07", sample_data({"8:30": 2}, {"closures": [{"date": "2026-10-07", "ranges": [{"start": "10:00", "end": "12:00"}]}]})),
     }
     only = os.environ.get("PREVIEW_ONLY", "")
-    for theme in ("ocean", "sunset", "milk"):
+    for theme in THEMES:
         for name, (date, data) in scenarios.items():
             if only and only != name:
                 continue
+            if theme in ("sakura", "lemon", "forest", "night") and name not in ("weekday", "options", "closed"):
+                continue  # 新しい4色は、主な3パターンだけ確認用に作る
             d = json.loads(json.dumps(data).replace("SAMPLEDATE", date))
             cfg = {"theme": theme, "handle": "@koumura_b.c"}
             out = outdir / ("preview-%s-%s.jpg" % (theme, name))

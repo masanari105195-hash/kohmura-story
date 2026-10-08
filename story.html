@@ -11,35 +11,14 @@
      今日の予約状況ストーリー画像（1080×1920）
      Instagramの画面は、上端約250pxと下端約280pxに、アカウント名・返信欄が重なる。
      大事な内容は、その間（y=250〜1640）に収める。
-     配色（theme）は、下の .theme-◯◯ の変数で切り替える。
+     配色は、common.js の STORY_BUILTIN_THEMES（標準7色）と、スタッフページで作った配色から決める。
      ============================================================ */
   *{box-sizing:border-box; margin:0; padding:0}
   html,body{width:1080px; height:1920px; overflow:hidden; background:#000}
   body{font-family:"Zen Maru Gothic","Noto Sans CJK JP","Noto Sans JP","Hiragino Sans","Yu Gothic",sans-serif; -webkit-font-smoothing:antialiased}
   .en{font-family:"Josefin Sans","Helvetica Neue",Arial,sans-serif}
 
-  /* ---- 配色 ---- */
-  .theme-ocean{
-    --bg:linear-gradient(165deg,#052a40 0%,#0a5c7a 34%,#0f9ea3 68%,#86e3b4 100%);
-    --blob1:rgba(134,239,196,.38); --blob2:rgba(255,226,140,.30); --blob3:rgba(120,200,255,.28);
-    --ink:#ffffff; --sub:rgba(255,255,255,.78);
-    --card:rgba(255,255,255,.13); --cardline:rgba(255,255,255,.38); --rowline:rgba(255,255,255,.28);
-    --ok:#9bf6c4; --few:#ffd166; --full:rgba(255,255,255,.50); --accent:#ffffff; --chip:rgba(255,255,255,.18);
-  }
-  .theme-sunset{
-    --bg:linear-gradient(165deg,#34195f 0%,#a24b8a 38%,#f0777f 70%,#ffbf8b 100%);
-    --blob1:rgba(255,214,170,.40); --blob2:rgba(255,120,170,.34); --blob3:rgba(150,120,255,.30);
-    --ink:#ffffff; --sub:rgba(255,255,255,.82);
-    --card:rgba(255,255,255,.14); --cardline:rgba(255,255,255,.40); --rowline:rgba(255,255,255,.30);
-    --ok:#c3fadc; --few:#ffe38e; --full:rgba(255,255,255,.52); --accent:#ffffff; --chip:rgba(255,255,255,.20);
-  }
-  .theme-milk{
-    --bg:linear-gradient(165deg,#f7fbf9 0%,#e0f3ec 48%,#fdf1e0 100%);
-    --blob1:rgba(110,205,170,.34); --blob2:rgba(255,196,120,.34); --blob3:rgba(130,190,235,.26);
-    --ink:#1d3a33; --sub:#4f6b63;
-    --card:rgba(255,255,255,.72); --cardline:rgba(47,111,98,.20); --rowline:rgba(47,111,98,.20);
-    --ok:#1f9d74; --few:#d98a16; --full:#93a69d; --accent:#2f6f62; --chip:rgba(47,111,98,.10);
-  }
+  /* ---- 配色：色の変数（--bg, --ink など）は、描画時に common.js の配色データから #stage に設定する ---- */
 
   /* ---- 画面全体 ---- */
   #stage{position:relative; width:1080px; height:1920px; background:var(--bg); color:var(--ink); overflow:hidden}
@@ -74,11 +53,10 @@
   li .dots{flex:1; height:0; border-top:3px dotted var(--rowline); transform:translateY(2px)}
   li .mark{width:64px; height:64px; display:flex; align-items:center; justify-content:center}
   li .mark svg{width:60px; height:60px; overflow:visible}
-  li.ok .mark svg{color:var(--ok); filter:drop-shadow(0 0 10px rgba(155,246,196,.45))}
-  li.few .mark svg{color:var(--few); filter:drop-shadow(0 0 10px rgba(255,209,102,.45))}
+  li.ok .mark svg{color:var(--ok); filter:var(--glow-ok,none)}
+  li.few .mark svg{color:var(--few); filter:var(--glow-few,none)}
   li.full .mark svg{color:var(--full)}
   li.full .t{color:var(--full)}
-  .theme-milk li.ok .mark svg, .theme-milk li.few .mark svg{filter:none}
   ul.cols2{columns:2; column-gap:30px}
 
   /* ---- オプションの予約状況を載せる日の行：「時間　◯　オプション名」の順に並べる ---- */
@@ -116,7 +94,7 @@
 </style>
 </head>
 <body>
-<div id="stage" class="theme-milk">
+<div id="stage">
   <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
   <div class="ring r1"></div><div class="ring r2"></div>
   <header>
@@ -216,7 +194,19 @@
   window.renderStory = function(payload){
     const cfg = Object.assign({ theme:"milk", clinic:"こうむら接骨院", handle:"", cta:"ご予約はプロフィールのリンクから", note:"" }, payload.config||{});
     const today = payload.today, d = payload.data || {};
-    document.getElementById("stage").className = "theme-" + cfg.theme;
+    // ---- 配色と背景画像 ----
+    // payload.story = { config:{mode,fixedId,weekly,themes}, images:{画像ID:data URL} }（予約システムの設定）。
+    // 無い（Code.gsが古い）場合は、従来どおり cfg.theme（標準の配色のid）を使う。
+    const story = payload.story && payload.story.config ? payload.story : null;
+    const themeId = story ? storyThemeIdFor(story.config, payload.today) : cfg.theme;
+    const theme = storyFindTheme(themeId, story ? story.config.themes : []);
+    const stage = document.getElementById("stage");
+    const vars = storyVarsFor(theme);
+    Object.keys(vars).forEach(k => stage.style.setProperty(k, vars[k]));
+    stage.dataset.theme = theme.id;
+    document.querySelectorAll("#stage .bgimg").forEach(el => el.remove());
+    const imgUrl = story && theme.image && story.images ? story.images[theme.image.imageId] : "";
+    if (imgUrl) document.querySelector("#stage .b3").insertAdjacentHTML("afterend", storyImageHtml(theme, imgUrl));
 
     setCapacity(d.capacity); setSlotCapacities(d.slotCapacities);
     setExtraClosures(d.closures); setExtraOpenDays(d.openDays);
