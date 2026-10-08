@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/33184236/README.md)
+[README.md](https://github.com/user-attachments/files/33186775/README.md)
 # 今日の予約状況を、Instagramのストーリーに毎朝自動で投稿する
 
 予約システムの「今日の予約状況」を、毎朝、おしゃれな画像にして、Instagramのストーリーに自動投稿します。
@@ -79,7 +79,7 @@
    - **Public（公開）** にします。画像を公開URLで見られるようにするためです（画像には、予約状況の◯△×しか載りません）。
    - 作成後の画面で、リポジトリ名の近くに「Private」と出ていないか確認します。「Private」なら、「Settings」→ 一番下の「Danger Zone」→「Change visibility」で Public に変えます。
 
-2. **ファイルを2つアップロードします。** リポジトリの画面の「uploading an existing file」のリンク（または「Add file」→「Upload files」）を押し、`story.html` と `make_story.py` の2つを、画面にドラッグします（フォルダごとではなく、ファイルを2つ選んでドラッグします）。下の「Commit changes」を押して保存します。
+2. **ファイルを3つアップロードします。** リポジトリの画面の「uploading an existing file」のリンク（または「Add file」→「Upload files」）を押し、`story.html`・`make_story.py`・`common.js` の3つを、画面にドラッグします（フォルダごとではなく、ファイルを3つ選んでドラッグします）。`common.js` は、公開サイトのものが古い場合の予備として使われます。機能を追加したら、3つとも最新に入れ替えてください。下の「Commit changes」を押して保存します。
 
 3. **自動実行の設定ファイルを、画面上で作ります。** `.github` フォルダは、パソコンでは見えない隠しフォルダなので、ドラッグではなく、次の方法で作ります。
    - 「Add file」→「Create new file」を押します。
@@ -141,4 +141,6 @@
 | 「unauthorized」 | `STORY_SECRET`（GitHub）と `STORY_PUSH_SECRET`（Apps Script）が同じか |
 | Instagramの権限・トークンのエラー | トークンの期限切れや、権限不足の可能性があります。手順1でトークンを作り直し、`IG_ACCESS_TOKEN` を書き換えます |
 | 「Apps Scriptの応答がJSONではありません」 | Code.gsを貼り替えたあと、「新バージョン」でデプロイしたか |
+| 画像がうまく作れない・Actionsが赤 | Actionsの実行を開き、赤くなった手順（Render story image）のログの最後の数行を見てください。「画像づくり◯回目に失敗: …」と原因が出ます。作れた場合も、実行画面の下の「Artifacts」に `story-image` として画像が残ります。最新の `story.html`・`make_story.py`・`common.js` をリポジトリに入れ替えると直ることが多いです |
+| 画像が作られない（Actionsが赤）で、ログに「setOptionDefs is not defined」など | 公開サイトの `common.js` が古い状態です。最新の `common.js` を、Cloudflare Pagesとリポジトリの両方に上げてください（リポジトリ側にあれば、自動でそちらを使います） |
 | 年が変わって、祝日がずれる | 祝日一覧は、予約システムの `common.js` と `Code.gs` の中にあります。年が変わる前に、追記してください |
