@@ -200,7 +200,7 @@
   // 長いオプション名は、枠からはみ出さないよう、文字を小さくして収める
   function fitOptionLabels(){
     document.querySelectorAll(".opts").forEach(box => {
-      const limit = box.getBoundingClientRect().width;
+      const limit = box.getBoundingClientRect().width - 8; // 枠の端に付かないよう、少し余裕を持たせる
       box.querySelectorAll(".opt").forEach(el => {
         let fs = parseFloat(getComputedStyle(el).fontSize);
         while (el.getBoundingClientRect().width > limit && fs > 15) { fs -= 1; el.style.fontSize = fs + "px"; }
