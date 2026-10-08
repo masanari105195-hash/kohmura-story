@@ -1,0 +1,75 @@
+name: instagram-story
+
+on:
+  schedule:
+    - cron: "17 21 * * *"   # 毎朝 6:17（日本時間）
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "画像にする日付（空欄なら今日。例 2026-10-08）"
+        required: false
+      skip_post:
+        description: "true なら画像を作るだけで、Instagramには投稿しない"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: instagram-story
+  cancel-in-progress: false
+
+jobs:
+  story:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      API_URL: ${{ secrets.API_URL }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+      STORY_SECRET: ${{ secrets.STORY_SECRET }}
+      STORY_THEME: ${{ vars.STORY_THEME }}
+      STORY_CLINIC: ${{ vars.STORY_CLINIC }}
+      STORY_HANDLE: ${{ vars.STORY_HANDLE }}
+      STORY_CTA: ${{ vars.STORY_CTA }}
+      STORY_NOTE: ${{ vars.STORY_NOTE }}
+      STORY_DATE: ${{ github.event.inputs.date }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright and fonts
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: Render story image
+        run: python make_story.py render
+
+      - name: Save image to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stories
+          git commit -m "story image" || echo "no changes"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push
+
+      - name: Keep image for checking
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-image
+          path: stories/*.jpg
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Post to Instagram
+        if: ${{ github.event.inputs.skip_post != 'true' }}
+        run: python make_story.py post

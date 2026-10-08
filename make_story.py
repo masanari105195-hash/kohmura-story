@@ -54,17 +54,37 @@ def http_get(url, timeout=60, retries=3):
     raise RuntimeError("取得に失敗しました: %s (%s)" % (url, last))
 
 
+REQUIRED_FUNCS = ("setOptionDefs", "optionUseFor", "isTrueValue", "getCountsForDate", "getRequiredSlots",
+                  "setSlotCapacities", "capacityFor", "normalizeBooking", "setExtraClosures", "setExtraOpenDays")
+
+
+def _missing_funcs(js):
+    return [f for f in REQUIRED_FUNCS if ("function " + f) not in js]
+
+
 def load_common_js():
+    """common.js を探す。公開サイト(SITE_URL)のものが古く、story.html が使う関数が足りない場合は、
+    このフォルダに置いた common.js（最新版）に自動で切り替える（古いままだと画像が作れないため）。"""
     p = os.environ.get("COMMON_JS_PATH", "").strip()
     if p:
         return pathlib.Path(p).read_text(encoding="utf-8")
+    local = HERE / "common.js"
+    local_js = local.read_text(encoding="utf-8") if local.exists() else ""
     site = os.environ.get("SITE_URL", "").strip().rstrip("/")
     if site:
-        return http_get(site + "/common.js")
-    local = HERE / "common.js"
-    if local.exists():
-        return local.read_text(encoding="utf-8")
-    raise RuntimeError("common.js が見つかりません。SITE_URL を設定するか、このフォルダに common.js を置いてください。")
+        try:
+            js = http_get(site + "/common.js")
+            miss = _missing_funcs(js)
+            if not miss:
+                return js
+            print("【注意】公開サイトの common.js が古いようです（不足: %s）。" % ", ".join(miss))
+            print("        予約システム（Cloudflare Pages）にも、最新の common.js を上げてください。")
+        except Exception as e:  # noqa
+            print("【注意】公開サイトの common.js を取得できませんでした:", e)
+    if local_js and not _missing_funcs(local_js):
+        print("リポジトリ内の common.js を使います。")
+        return local_js
+    raise RuntimeError("使える最新の common.js がありません。最新の common.js をリポジトリ（story.html と同じ場所）にアップロードしてください。")
 
 
 def config_from_env():
@@ -77,26 +97,53 @@ def config_from_env():
     }
 
 
-def render_image(payload, out_path, common_js):
+def _render_once(payload, out_path, common_js, block_fonts):
     from playwright.sync_api import sync_playwright
-    out_path = pathlib.Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    logs = []
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 1080, "height": 1920}, device_scale_factor=1)
-        if os.environ.get("NO_WEB_FONTS"):  # 通信できない環境での確認用
-            page.route("**/fonts.*/**", lambda r: r.abort())
-        page.goto((HERE / "story.html").as_uri(), wait_until="load", timeout=90000)
-        page.add_script_tag(content=common_js)
-        page.evaluate("p => window.renderStory(p)", payload)
         try:
-            page.evaluate("document.fonts.ready.then(() => true)")
-        except Exception:
-            pass
-        page.wait_for_timeout(600)
-        page.screenshot(path=str(out_path), type="jpeg", quality=92, clip={"x": 0, "y": 0, "width": 1080, "height": 1920})
-        browser.close()
-    return out_path
+            page = browser.new_page(viewport={"width": 1080, "height": 1920}, device_scale_factor=1)
+            page.on("console", lambda m: logs.append("console.%s: %s" % (m.type, m.text)) if m.type in ("error", "warning") else None)
+            page.on("pageerror", lambda e: logs.append("pageerror: %s" % e))
+            if block_fonts or os.environ.get("NO_WEB_FONTS"):  # Webフォントが取れない時は、入っているフォントで描く
+                page.route("**/fonts.*/**", lambda r: r.abort())
+            page.goto((HERE / "story.html").as_uri(), wait_until="domcontentloaded", timeout=60000)
+            page.add_script_tag(content=common_js)
+            try:
+                page.evaluate("p => window.renderStory(p)", payload)
+            except Exception as e:
+                raise RuntimeError("画像の描画でエラーが出ました（common.js が古い可能性があります）: %s" % str(e)[:300])
+            try:  # フォントの読み込みは最大8秒だけ待つ（待ち続けて固まらないように）
+                page.evaluate("Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 8000))]).then(() => true)")
+            except Exception:
+                pass
+            page.wait_for_timeout(600)
+            # 描けているかの確認：時間の行（または休診のカード）が1つもなければ失敗扱いにする
+            ok = page.evaluate("document.querySelectorAll('#content li, #content .closed').length")
+            if not ok:
+                raise RuntimeError("画像に内容が描かれていません。")
+            page.screenshot(path=str(out_path), type="jpeg", quality=92, clip={"x": 0, "y": 0, "width": 1080, "height": 1920})
+        finally:
+            browser.close()
+    for l in logs[:10]:
+        print("  [ブラウザ]", l)
+
+
+def render_image(payload, out_path, common_js):
+    out_path = pathlib.Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    last = None
+    for attempt, block in enumerate((False, False, True), 1):  # 1回目・2回目：通常／3回目：Webフォントなし
+        try:
+            _render_once(payload, out_path, common_js, block)
+            if out_path.exists() and out_path.stat().st_size > 20000:
+                return out_path
+            raise RuntimeError("画像ファイルが小さすぎます。")
+        except Exception as e:  # noqa
+            last = e
+            print("画像づくり %d回目に失敗: %s" % (attempt, e))
+    raise RuntimeError("画像を作れませんでした: %s" % last)
 
 
 def cleanup_old(stories_dir):
