@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/33191244/README.md)
 # 今日の予約状況を、Instagramのストーリーに毎朝自動で投稿する
 
 予約システムの「今日の予約状況」を、毎朝、おしゃれな画像にして、Instagramのストーリーに自動投稿します。
@@ -145,6 +144,7 @@
 | 「Apps Scriptの応答がJSONではありません」 | Code.gsを貼り替えたあと、「新バージョン」でデプロイしたか |
 | 画像がうまく作れない・Actionsが赤 | Actionsの実行を開き、赤くなった手順（Render story image）のログの最後の数行を見てください。「画像づくり◯回目に失敗: …」と原因が出ます。作れた場合も、実行画面の下の「Artifacts」に `story-image` として画像が残ります。最新の `story.html`・`make_story.py`・`common.js` をリポジトリに入れ替えると直ることが多いです |
 | 画像が作られない（Actionsが赤）で、ログに「setOptionDefs is not defined」など | 公開サイトの `common.js` が古い状態です。最新の `common.js` を、Cloudflare Pagesとリポジトリの両方に上げてください（リポジトリ側にあれば、自動でそちらを使います） |
+| Actionsが「The operation was canceled」で止まる（フォントのインストール中） | 日本語の予備フォントのダウンロードが遅いときに起きます。最新の `story.yml` では、小さいフォントを使い、失敗しても先へ進むようにしてあります。`.github/workflows/story.yml` を最新に貼り替えてください |
 | 配色や背景画像が変わらない | Code.gs を最新にして「新バージョン」でデプロイしたか。GitHubの `story.html`・`make_story.py`・`common.js` を最新に入れ替えたか。Actionsのログに「配色の設定を取得できなかった」と出ていないか（出ている場合は、従来の方法で作られます） |
 | 背景画像だけ出ない | ログに「背景画像を取得できませんでした」と出ていないか（画像なしで投稿は続きます）。スタッフページで画像を選び直して保存してください |
 | 年が変わって、祝日がずれる | 祝日一覧は、予約システムの `common.js` と `Code.gs` の中にあります。年が変わる前に、追記してください |
