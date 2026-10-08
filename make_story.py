@@ -150,16 +150,27 @@ def render_image(payload, out_path, common_js):
     raise RuntimeError("画像を作れませんでした: %s" % last)
 
 
+def story_date_of(path):
+    """story-2026-10-08.jpg / story-2026-10-08-1625.jpg のどちらからでも、日付(YYYY-MM-DD)を取り出す"""
+    try:
+        return datetime.date.fromisoformat(pathlib.Path(path).stem[len("story-"):len("story-") + 10])
+    except ValueError:
+        return None
+
+
 def cleanup_old(stories_dir):
     cutoff = datetime.datetime.now(JST).date() - datetime.timedelta(days=KEEP_DAYS)
     for f in pathlib.Path(stories_dir).glob("story-*.jpg"):
-        try:
-            d = datetime.date.fromisoformat(f.stem.replace("story-", ""))
-        except ValueError:
-            continue
-        if d < cutoff:
+        d = story_date_of(f)
+        if d and d < cutoff:
             f.unlink()
             print("古い画像を削除:", f.name)
+
+
+def latest_story_file(stories_dir, date):
+    """その日の画像のうち、いちばん新しいもの（時刻つきの名前が新しい順）。無ければ None"""
+    files = sorted(pathlib.Path(stories_dir).glob("story-%s*.jpg" % date))
+    return files[-1] if files else None
 
 
 def resolve_theme_id(sc, date):
@@ -205,7 +216,10 @@ def cmd_render():
     data = json.loads(http_get(api + ("&" if "?" in api else "?") + "action=availability"))
     if not data.get("ok") or not isinstance(data.get("bookings"), list):
         sys.exit("予約システムの応答が想定と違います（Code.gsが最新か確認してください）: %s" % str(data)[:200])
-    out = HERE / "stories" / ("story-%s.jpg" % date)
+    # 毎回ちがう名前（時刻つき）で保存する。同じ名前だと、GitHubの公開URLが古い画像を返すことがあり、
+    # 「更新されない」ように見えるため。同じ日の古い画像は、このあと消す。
+    stamp = datetime.datetime.now(JST).strftime("%H%M")
+    out = HERE / "stories" / ("story-%s-%s.jpg" % (date, stamp))
     cfg = config_from_env()
     cfg["theme"] = choose_theme(data, cfg)  # 予約システムが古い場合の予備（従来の方法）
     story = fetch_story(api, date)
@@ -214,8 +228,13 @@ def cmd_render():
     if story:
         payload["story"] = {"config": story["config"], "images": story["images"]}
     render_image(payload, out, load_common_js())
+    for f in (HERE / "stories").glob("story-%s*.jpg" % date):
+        if f != out:
+            f.unlink()  # 同じ日の古い画像
     cleanup_old(HERE / "stories")
-    print("作成しました:", out, "(%d KB)" % (out.stat().st_size // 1024))
+    today_n = len([b for b in data.get("bookings", []) if b.get("date") == date])
+    import hashlib
+    print("作成しました:", out.name, "(%d KB)" % (out.stat().st_size // 1024), "／ 中身の目印:", hashlib.md5(out.read_bytes()).hexdigest()[:8], "／ この日の予約:", today_n, "件")
 
 
 def image_public_url(date):
@@ -224,7 +243,9 @@ def image_public_url(date):
         repo = os.environ.get("GITHUB_REPOSITORY", "")
         branch = os.environ.get("GITHUB_REF_NAME", "main")
         base = "https://raw.githubusercontent.com/%s/%s" % (repo, branch)
-    return "%s/stories/story-%s.jpg" % (base, date)
+    f = latest_story_file(HERE / "stories", date)
+    name = f.name if f else "story-%s.jpg" % date
+    return "%s/stories/%s" % (base, name)
 
 
 def wait_until_public(url, timeout_sec=150):

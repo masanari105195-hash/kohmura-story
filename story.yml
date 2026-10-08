@@ -65,10 +65,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stories
-          git commit -m "story image" || echo "no changes"
-          git pull --rebase origin "${GITHUB_REF_NAME}" || true
-          git push
+          git add -A stories
+          git status --short stories
+          git commit -m "story image" || echo "変更がないため、保存は不要でした"
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            echo "保存をやり直します（${i}回目）"; sleep 5
+          done
+          echo "--- リポジトリの stories フォルダ ---"
+          git ls-files stories
+          git log -1 --stat --format="最新の保存: %h %s"
 
       - name: Keep image for checking
         if: always()
