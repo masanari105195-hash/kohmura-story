@@ -2,7 +2,10 @@ name: instagram-story
 
 on:
   schedule:
-    - cron: "17 21 * * *"   # 毎朝 6:17（日本時間）
+    # GitHubの定期実行は混み合うと数時間遅れることがあるため、早めに起動し、保険でもう1回走らせる。
+    # 2回目は、すでに投稿済みならApps Script側の二重投稿防止で投稿されない。
+    - cron: "43 19 * * *"   # 毎朝 4:43（日本時間）
+    - cron: "13 21 * * *"   # 毎朝 6:13（日本時間・保険）
   workflow_dispatch:
     inputs:
       date:

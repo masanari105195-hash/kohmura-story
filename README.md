@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/33193746/README.md)
 # 今日の予約状況を、Instagramのストーリーに毎朝自動で投稿する
 
 予約システムの「今日の予約状況」を、毎朝、おしゃれな画像にして、Instagramのストーリーに自動投稿します。
