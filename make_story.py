@@ -278,7 +278,8 @@ def cmd_post():
     body = json.dumps({"action": "postStory", "secret": secret, "imageUrl": url, "date": date}).encode("utf-8")
     # Apps Scriptは、POSTを処理した後に応答を別URLへ転送するため、転送先を自動でたどる
     req = urllib.request.Request(api, data=body, headers={"Content-Type": "text/plain;charset=utf-8"}, method="POST")
-    with urllib.request.urlopen(req, timeout=120) as r:
+    # Apps Script側で、Instagramの準備待ち・やり直しに最大2〜3分かかることがあるので長めに待つ
+    with urllib.request.urlopen(req, timeout=280) as r:
         text = r.read().decode("utf-8")
     try:
         res = json.loads(text)
